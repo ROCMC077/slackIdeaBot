@@ -21,7 +21,7 @@ SLACK_API_URL = "https://slack.com/api/chat.postMessage"
 
 
 # -----------------------------
-# Slack 驗證簽名
+# Slack 驗證簽名（可選）
 # -----------------------------
 def verify_slack_request(req):
     timestamp = req.headers.get("X-Slack-Request-Timestamp")
@@ -41,7 +41,7 @@ def verify_slack_request(req):
 
 
 # -----------------------------
-# 1. Slash Command：/submit-idea → 打開 Block Kit Modal
+# 1. Slash Command：/submit-idea
 # -----------------------------
 @app.route("/submit-idea", methods=["POST"])
 def open_idea_form():
@@ -60,7 +60,7 @@ def open_idea_form():
 
 
 # -----------------------------
-# 2. Slack Interactions：接收 view_submission
+# 2. Slack Interactions：view_submission
 # -----------------------------
 @app.route("/slack/interactions", methods=["POST"])
 def slack_interactions():
@@ -69,18 +69,13 @@ def slack_interactions():
     if payload["type"] == "view_submission":
         state = payload["view"]["state"]["values"]
 
-        # 解析平台（多選）
         platforms = [opt["value"] for opt in state["platform"]["platform_select"]["selected_options"]]
-
-        # 解析關鍵字（多選）
         keywords = [opt["value"] for opt in state["keywords"]["keyword_select"]["selected_options"]]
 
-        # 若選其它 → 加入填寫內容
         other_keyword = state["keyword_other"]["keyword_other_input"].get("value")
         if other_keyword:
             keywords.append(other_keyword)
 
-        # 解析連結（多筆）
         raw_links = state["links"]["links_input"].get("value", "")
         links = {}
         for line in raw_links.split("\n"):
@@ -88,13 +83,10 @@ def slack_interactions():
                 k, v = line.split("：", 1)
                 links.setdefault(k.strip(), []).append(v.strip())
 
-        # 補充資訊
         extra_info = state["extra_info"]["extra_info_input"].get("value", "")
 
-        # 存資料庫
         idea_id = insert_idea(platforms, keywords, links, extra_info)
 
-        # 回覆 Slack
         return {
             "response_action": "update",
             "view": {
@@ -118,11 +110,18 @@ def slack_interactions():
 # -----------------------------
 @app.route("/events", methods=["POST"])
 def slack_events():
-    data = request.json
 
-    # Slack URL 驗證
+    # Slack URL 驗證（x-www-form-urlencoded）
+    if request.headers.get("Content-Type") == "application/x-www-form-urlencoded":
+        form = request.form
+        if "challenge" in form:
+            return form["challenge"], 200
+
+    # 其他事件（JSON）
+    data = request.get_json(silent=True) or {}
+
     if "challenge" in data:
-        return make_response(data["challenge"], 200)
+        return data["challenge"], 200
 
     event = data.get("event", {})
     text = event.get("text", "")
@@ -157,7 +156,7 @@ def slack_events():
             reply(channel, f"{text} 相關的 idea：\n{ids}\n輸入編號即可查看詳細內容")
         return "", 200
 
-    # 查看詳細（輸入 IDEA-000123）
+    # 查看詳細（IDEA-000123）
     if text.startswith("IDEA-"):
         idea = get_idea_by_id(text)
         if not idea:
@@ -186,7 +185,7 @@ def reply(channel, text):
 
 
 # -----------------------------
-# 啟動 Flask
+# 啟動 Flask（Railway 必須這樣）
 # -----------------------------
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))
