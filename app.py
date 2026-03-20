@@ -16,7 +16,6 @@ app = Flask(__name__)
 # 初始化資料庫
 init_db()
 
-# Slack API
 SLACK_API_URL = "https://slack.com/api/chat.postMessage"
 
 
@@ -72,30 +71,50 @@ def open_idea_form():
 # -----------------------------
 @app.route("/slack/interactions", methods=["POST"])
 def slack_interactions():
-    payload = json.loads(request.form["payload"])
+    # Slack 有時候用 form-data，有時候用 JSON
+    raw = request.form.get("payload")
+    if not raw:
+        raw = request.get_data(as_text=True)
 
+    payload = json.loads(raw)
+
+    # 處理 modal 提交
     if payload["type"] == "view_submission":
         state = payload["view"]["state"]["values"]
 
-        platforms = [opt["value"] for opt in state["platform"]["platform_select"]["selected_options"]]
-        keywords = [opt["value"] for opt in state["keywords"]["keyword_select"]["selected_options"]]
+        # 平台
+        platforms = [
+            opt["value"]
+            for opt in state["platform"]["platform_select"].get("selected_options", [])
+        ]
 
-        other_keyword = state["keyword_other"]["keyword_other_input"].get("value")
+        # 關鍵字
+        keywords = [
+            opt["value"]
+            for opt in state["keywords"]["keyword_select"].get("selected_options", [])
+        ]
+
+        # 其他關鍵字
+        other_keyword = state["keyword_other"]["keyword_other_input"].get("value") or ""
         if other_keyword:
             keywords.append(other_keyword)
 
-        raw_links = state["links"]["links_input"].get("value", "")
+        # 連結（可能為 None）
+        raw_links = state["links"]["links_input"].get("value") or ""
         links = {}
         for line in raw_links.split("\n"):
             if "：" in line:
                 k, v = line.split("：", 1)
                 links.setdefault(k.strip(), []).append(v.strip())
 
-        extra_info = state["extra_info"]["extra_info_input"].get("value", "")
+        # 補充資訊
+        extra_info = state["extra_info"]["extra_info_input"].get("value") or ""
 
+        # 寫入資料庫
         idea_id = insert_idea(platforms, keywords, links, extra_info)
 
-        return {
+        # 回傳成功 modal
+        return jsonify({
             "response_action": "update",
             "view": {
                 "type": "modal",
@@ -104,11 +123,14 @@ def slack_interactions():
                 "blocks": [
                     {
                         "type": "section",
-                        "text": {"type": "mrkdwn", "text": f"你的 Idea 已成功投稿！\n編號：*{idea_id}*"}
+                        "text": {
+                            "type": "mrkdwn",
+                            "text": f"你的 Idea 已成功投稿！\n編號：*{idea_id}*"
+                        }
                     }
                 ]
             }
-        }
+        })
 
     return "", 200
 
@@ -193,7 +215,7 @@ def reply(channel, text):
 
 
 # -----------------------------
-# 啟動 Flask（Railway 必須這樣）
+# 啟動 Flask（Railway 必須）
 # -----------------------------
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))
