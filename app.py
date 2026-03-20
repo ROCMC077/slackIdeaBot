@@ -21,6 +21,14 @@ SLACK_API_URL = "https://slack.com/api/chat.postMessage"
 
 
 # -----------------------------
+# 健康檢查（Railway 必須）
+# -----------------------------
+@app.route("/", methods=["GET"])
+def home():
+    return "OK", 200
+
+
+# -----------------------------
 # Slack 驗證簽名（可選）
 # -----------------------------
 def verify_slack_request(req):
