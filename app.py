@@ -1,15 +1,21 @@
 import os
 import json
-import sqlite3
-from flask import Flask, request, jsonify, make_response
+import time
+import hmac
+import hashlib
+import requests
+from flask import Flask, request, jsonify
 from config import SLACK_BOT_TOKEN, SLACK_SIGNING_SECRET
 from blockkit import idea_form_modal, idea_detail_block
-from db import init_db, insert_idea, get_random_idea, get_ideas_by_platform, get_ideas_by_keyword, get_idea_by_id
+from db import (
+    init_db,
+    insert_idea,
+    get_random_idea,
+    get_ideas_by_platform,
+    get_ideas_by_keyword,
+    get_idea_by_id,
+)
 from query import is_platform, is_keyword
-import hashlib
-import hmac
-import time
-import requests
 
 app = Flask(__name__)
 
@@ -17,6 +23,7 @@ app = Flask(__name__)
 init_db()
 
 SLACK_API_URL = "https://slack.com/api/chat.postMessage"
+BOT_USER_ID = os.environ.get("BOT_USER_ID")
 
 
 # -----------------------------
@@ -28,12 +35,16 @@ def home():
 
 
 # -----------------------------
-# Slack 驗證簽名（可選）
+# Slack 簽名驗證（可選，建議保留）
 # -----------------------------
 def verify_slack_request(req):
     timestamp = req.headers.get("X-Slack-Request-Timestamp")
     slack_signature = req.headers.get("X-Slack-Signature")
 
+    if not timestamp or not slack_signature:
+        return False
+
+    # 防止重放攻擊（5 分鐘）
     if abs(time.time() - int(timestamp)) > 60 * 5:
         return False
 
@@ -41,17 +52,21 @@ def verify_slack_request(req):
     my_signature = "v0=" + hmac.new(
         SLACK_SIGNING_SECRET.encode(),
         sig_basestring.encode(),
-        hashlib.sha256
+        hashlib.sha256,
     ).hexdigest()
 
     return hmac.compare_digest(my_signature, slack_signature)
 
 
 # -----------------------------
-# 1. Slash Command：/submit-idea
+# 1. Slash Command：/submit-idea（投稿）
 # -----------------------------
 @app.route("/submit-idea", methods=["POST"])
 def open_idea_form():
+    # 如果要啟用簽名驗證，取消註解：
+    # if not verify_slack_request(request):
+    #     return "Invalid signature", 403
+
     payload = request.form
     trigger_id = payload.get("trigger_id")
 
@@ -60,46 +75,46 @@ def open_idea_form():
     requests.post(
         "https://slack.com/api/views.open",
         headers={"Authorization": f"Bearer {SLACK_BOT_TOKEN}"},
-        json={"trigger_id": trigger_id, "view": modal}
+        json={"trigger_id": trigger_id, "view": modal},
     )
 
     return "", 200
 
 
 # -----------------------------
-# 2. Slack Interactions：view_submission
+# 2. Slack Interactions：view_submission（投稿完成）
 # -----------------------------
 @app.route("/slack/interactions", methods=["POST"])
 def slack_interactions():
-    # Slack 有時候用 form-data，有時候用 JSON
-    raw = request.form.get("payload")
-    if not raw:
-        raw = request.get_data(as_text=True)
+    # if not verify_slack_request(request):
+    #     return "Invalid signature", 403
 
+    raw = request.form.get("payload") or request.get_data(as_text=True)
     payload = json.loads(raw)
 
-    # 處理 modal 提交
-    if payload["type"] == "view_submission":
+    if payload.get("type") == "view_submission":
         state = payload["view"]["state"]["values"]
 
-        # 平台
+        # 平台（多選）
         platforms = [
             opt["value"]
             for opt in state["platform"]["platform_select"].get("selected_options", [])
         ]
 
-        # 關鍵字
+        # 關鍵字（多選）
         keywords = [
             opt["value"]
             for opt in state["keywords"]["keyword_select"].get("selected_options", [])
         ]
 
-        # 其他關鍵字
-        other_keyword = state["keyword_other"]["keyword_other_input"].get("value") or ""
+        # 其他關鍵字（填空）
+        other_keyword = (
+            state["keyword_other"]["keyword_other_input"].get("value") or ""
+        )
         if other_keyword:
             keywords.append(other_keyword)
 
-        # 連結（可能為 None）
+        # 連結（多行文字，格式：分類：連結）
         raw_links = state["links"]["links_input"].get("value") or ""
         links = {}
         for line in raw_links.split("\n"):
@@ -108,85 +123,98 @@ def slack_interactions():
                 links.setdefault(k.strip(), []).append(v.strip())
 
         # 補充資訊
-        extra_info = state["extra_info"]["extra_info_input"].get("value") or ""
+        extra_info = (
+            state["extra_info"]["extra_info_input"].get("value") or ""
+        )
 
         # 寫入資料庫
         idea_id = insert_idea(platforms, keywords, links, extra_info)
 
         # 回傳成功 modal
-        return jsonify({
-            "response_action": "update",
-            "view": {
-                "type": "modal",
-                "title": {"type": "plain_text", "text": "投稿成功"},
-                "close": {"type": "plain_text", "text": "關閉"},
-                "blocks": [
-                    {
-                        "type": "section",
-                        "text": {
-                            "type": "mrkdwn",
-                            "text": f"你的 Idea 已成功投稿！\n編號：*{idea_id}*"
+        return jsonify(
+            {
+                "response_action": "update",
+                "view": {
+                    "type": "modal",
+                    "title": {"type": "plain_text", "text": "投稿成功"},
+                    "close": {"type": "plain_text", "text": "關閉"},
+                    "blocks": [
+                        {
+                            "type": "section",
+                            "text": {
+                                "type": "mrkdwn",
+                                "text": f"你的 Idea 已成功投稿！\n編號：*{idea_id}*",
+                            },
                         }
-                    }
-                ]
+                    ],
+                },
             }
-        })
+        )
 
     return "", 200
 
 
 # -----------------------------
-# 3. Events API：抽、查詢、查看詳細
+# 3. Events API：純聊天機器人模式（@Slack Idea Bot）
 # -----------------------------
 @app.route("/events", methods=["POST"])
 def slack_events():
-
-    # Slack URL 驗證（x-www-form-urlencoded）
-    if request.headers.get("Content-Type") == "application/x-www-form-urlencoded":
-        form = request.form
-        if "challenge" in form:
-            return form["challenge"], 200
-
-    # 其他事件（JSON）
     data = request.get_json(silent=True) or {}
 
+    # Slack URL 驗證
     if "challenge" in data:
         return data["challenge"], 200
 
     event = data.get("event", {})
-    text = event.get("text", "")
+    if event.get("type") != "app_mention":
+        return "", 200
+
+    text = event.get("text", "") or ""
     channel = event.get("channel")
 
-    # 抽
+    # 去除 @bot mention
+    if BOT_USER_ID:
+        text = text.replace(f"<@{BOT_USER_ID}>", "").strip()
+
+    # 1. 抽
     if "抽" in text:
         idea = get_random_idea()
         if not idea:
             reply(channel, "目前沒有任何投稿喔！")
         else:
-            reply(channel, f"抽到：{idea['idea_id']}\n輸入編號即可查看詳細內容")
+            reply(
+                channel,
+                f"抽到：{idea['idea_id']}\n輸入 IDEA 編號即可查看詳細內容",
+            )
         return "", 200
 
-    # 平台查詢
+    # 2. 平台查詢（Instagram / Facebook / Threads / Reels / Storys / Big idea）
     if is_platform(text):
         ideas = get_ideas_by_platform(text)
         if not ideas:
             reply(channel, f"沒有找到與 {text} 相關的 idea")
         else:
             ids = "\n".join([i["idea_id"] for i in ideas])
-            reply(channel, f"{text} 相關的 idea：\n{ids}\n輸入編號即可查看詳細內容")
+            reply(
+                channel,
+                f"{text} 相關的 idea：\n{ids}\n輸入 IDEA 編號即可查看詳細內容",
+            )
         return "", 200
 
-    # 關鍵字查詢
+    # 3. 關鍵字查詢（星座 / 節慶 / 借勢 / 諧音 / MBTI / 測驗網 / 短期案 / 殺手鐧 / 貼文大賞 / 遺珠 / 其它）
     if is_keyword(text):
         ideas = get_ideas_by_keyword(text)
         if not ideas:
             reply(channel, f"沒有找到與 {text} 相關的 idea")
         else:
             ids = "\n".join([i["idea_id"] for i in ideas])
-            reply(channel, f"{text} 相關的 idea：\n{ids}\n輸入編號即可查看詳細內容")
+            reply(
+                channel,
+                f"{text} 相關的 idea：\n{ids}\n輸入 IDEA 編號即可查看詳細內容",
+            )
         return "", 200
 
-    # 查看詳細（IDEA-000123）
+    # 4. 查單一 IDEA（IDEA-000123）
     if text.startswith("IDEA-"):
         idea = get_idea_by_id(text)
         if not idea:
@@ -196,21 +224,26 @@ def slack_events():
             requests.post(
                 SLACK_API_URL,
                 headers={"Authorization": f"Bearer {SLACK_BOT_TOKEN}"},
-                json={"channel": channel, "blocks": block}
+                json={"channel": channel, "blocks": block},
             )
         return "", 200
 
+    # 5. 其他輸入（可選：給提示）
+    reply(
+        channel,
+        "你可以輸入：\n- 抽\n- 平台名稱（Instagram / Facebook / Threads / Reels / Storys / Big idea）\n- 關鍵字（星座 / 節慶 / 借勢 / 諧音 / MBTI / 測驗網 / 短期案 / 殺手鐧 / 貼文大賞 / 遺珠 / 其它）\n- IDEA 編號（例如：IDEA-000001）",
+    )
     return "", 200
 
 
 # -----------------------------
-# Slack 回覆訊息
+# Slack 回覆訊息（純文字）
 # -----------------------------
 def reply(channel, text):
     requests.post(
         SLACK_API_URL,
         headers={"Authorization": f"Bearer {SLACK_BOT_TOKEN}"},
-        json={"channel": channel, "text": text}
+        json={"channel": channel, "text": text},
     )
 
 
