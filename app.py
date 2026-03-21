@@ -174,7 +174,8 @@ def slack_events():
 
     # 去除 @bot mention
     if BOT_USER_ID:
-        text = text.replace(f"<@{BOT_USER_ID}>", "").strip()
+        text = text.replace(f"<@{BOT_USER_ID}>", "")
+    	text = text.replace("\n", "").replace("\r", "").strip()
 
     # 1. 抽
     if "抽" in text:
