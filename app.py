@@ -35,7 +35,7 @@ def home():
 
 
 # -----------------------------
-# Slack 簽名驗證（可選，建議保留）
+# Slack 簽名驗證（可選）
 # -----------------------------
 def verify_slack_request(req):
     timestamp = req.headers.get("X-Slack-Request-Timestamp")
@@ -44,7 +44,6 @@ def verify_slack_request(req):
     if not timestamp or not slack_signature:
         return False
 
-    # 防止重放攻擊（5 分鐘）
     if abs(time.time() - int(timestamp)) > 60 * 5:
         return False
 
@@ -63,10 +62,6 @@ def verify_slack_request(req):
 # -----------------------------
 @app.route("/submit-idea", methods=["POST"])
 def open_idea_form():
-    # 如果要啟用簽名驗證，取消註解：
-    # if not verify_slack_request(request):
-    #     return "Invalid signature", 403
-
     payload = request.form
     trigger_id = payload.get("trigger_id")
 
@@ -86,35 +81,28 @@ def open_idea_form():
 # -----------------------------
 @app.route("/slack/interactions", methods=["POST"])
 def slack_interactions():
-    # if not verify_slack_request(request):
-    #     return "Invalid signature", 403
-
     raw = request.form.get("payload") or request.get_data(as_text=True)
     payload = json.loads(raw)
 
     if payload.get("type") == "view_submission":
         state = payload["view"]["state"]["values"]
 
-        # 平台（多選）
         platforms = [
             opt["value"]
             for opt in state["platform"]["platform_select"].get("selected_options", [])
         ]
 
-        # 關鍵字（多選）
         keywords = [
             opt["value"]
             for opt in state["keywords"]["keyword_select"].get("selected_options", [])
         ]
 
-        # 其他關鍵字（填空）
         other_keyword = (
             state["keyword_other"]["keyword_other_input"].get("value") or ""
         )
         if other_keyword:
             keywords.append(other_keyword)
 
-        # 連結（多行文字，格式：分類：連結）
         raw_links = state["links"]["links_input"].get("value") or ""
         links = {}
         for line in raw_links.split("\n"):
@@ -122,15 +110,12 @@ def slack_interactions():
                 k, v = line.split("：", 1)
                 links.setdefault(k.strip(), []).append(v.strip())
 
-        # 補充資訊
         extra_info = (
             state["extra_info"]["extra_info_input"].get("value") or ""
         )
 
-        # 寫入資料庫
         idea_id = insert_idea(platforms, keywords, links, extra_info)
 
-        # 回傳成功 modal
         return jsonify(
             {
                 "response_action": "update",
@@ -161,7 +146,6 @@ def slack_interactions():
 def slack_events():
     data = request.get_json(silent=True) or {}
 
-    # Slack URL 驗證
     if "challenge" in data:
         return data["challenge"], 200
 
@@ -172,10 +156,10 @@ def slack_events():
     text = event.get("text", "") or ""
     channel = event.get("channel")
 
-    # 去除 @bot mention
+    # 去除 @bot mention + 清洗字串
     if BOT_USER_ID:
         text = text.replace(f"<@{BOT_USER_ID}>", "")
-    	text = text.replace("\n", "").replace("\r", "").strip()
+        text = text.replace("\n", "").replace("\r", "").strip()
 
     # 1. 抽
     if "抽" in text:
@@ -189,7 +173,7 @@ def slack_events():
             )
         return "", 200
 
-    # 2. 平台查詢（Instagram / Facebook / Threads / Reels / Storys / Big idea）
+    # 2. 平台查詢
     if is_platform(text):
         ideas = get_ideas_by_platform(text)
         if not ideas:
@@ -202,7 +186,7 @@ def slack_events():
             )
         return "", 200
 
-    # 3. 關鍵字查詢（星座 / 節慶 / 借勢 / 諧音 / MBTI / 測驗網 / 短期案 / 殺手鐧 / 貼文大賞 / 遺珠 / 其它）
+    # 3. 關鍵字查詢
     if is_keyword(text):
         ideas = get_ideas_by_keyword(text)
         if not ideas:
@@ -215,7 +199,7 @@ def slack_events():
             )
         return "", 200
 
-    # 4. 查單一 IDEA（IDEA-000123）
+    # 4. 查單一 IDEA
     if text.startswith("IDEA-"):
         idea = get_idea_by_id(text)
         if not idea:
@@ -229,7 +213,7 @@ def slack_events():
             )
         return "", 200
 
-    # 5. 其他輸入（可選：給提示）
+    # 5. 其他輸入
     reply(
         channel,
         "你可以輸入：\n- 抽\n- 平台名稱（Instagram / Facebook / Threads / Reels / Storys / Big idea）\n- 關鍵字（星座 / 節慶 / 借勢 / 諧音 / MBTI / 測驗網 / 短期案 / 殺手鐧 / 貼文大賞 / 遺珠 / 其它）\n- IDEA 編號（例如：IDEA-000001）",
