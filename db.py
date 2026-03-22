@@ -4,7 +4,7 @@ import psycopg2
 import psycopg2.extras
 from datetime import datetime
 
-# 連線字串（Railway 會自動提供 DATABASE_URL）
+# Railway 提供的 DATABASE_URL
 DATABASE_URL = os.environ.get("DATABASE_URL")
 
 def get_conn():
@@ -12,7 +12,7 @@ def get_conn():
 
 
 # -----------------------------
-# 建立資料表（PostgreSQL）
+# 建立資料表
 # -----------------------------
 def init_db():
     conn = get_conn()
@@ -39,8 +39,9 @@ def init_db():
 # 產生 IDEA-000001 這種編號
 # -----------------------------
 def generate_idea_id(cur):
-    cur.execute("SELECT COUNT(*) FROM ideas;")
-    count = cur.fetchone()[0] + 1
+    cur.execute("SELECT COUNT(*) AS count FROM ideas;")
+    row = cur.fetchone()
+    count = row["count"] + 1
     return f"IDEA-{count:06d}"
 
 
@@ -89,10 +90,6 @@ def get_random_idea():
     cur.close()
     conn.close()
 
-    if not row:
-        return None
-
-    # JSONB 自動轉 dict，不用 loads
     return row
 
 
