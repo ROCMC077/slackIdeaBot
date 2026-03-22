@@ -84,7 +84,6 @@ def slack_interactions():
     raw = request.form.get("payload") or request.get_data(as_text=True)
     payload = json.loads(raw)
 
-    # Slack view_submission
     if payload.get("type") == "view_submission":
         values = payload["view"]["state"]["values"]
 
@@ -123,7 +122,12 @@ def slack_interactions():
             else:
                 continue
 
-            links.setdefault(k.strip(), []).append(v.strip())
+            v = v.strip()
+            # 修正 Slack 吃掉 https: 的 bug
+            if v.startswith("//"):
+                v = "https:" + v
+
+            links.setdefault(k.strip(), []).append(v)
 
         # 補充資訊
         extra_block = values.get("extra_info", {})
@@ -171,7 +175,6 @@ def slack_events():
     text = event.get("text", "") or ""
     channel = event.get("channel")
 
-    # 去除 @bot mention + 清洗字串
     if BOT_USER_ID:
         text = text.replace(f"<@{BOT_USER_ID}>", "")
         text = text.replace("\n", "").replace("\r", "").strip()
@@ -182,10 +185,7 @@ def slack_events():
         if not idea:
             reply(channel, "目前沒有任何投稿喔！")
         else:
-            reply(
-                channel,
-                f"抽到：{idea['idea_id']}\n輸入 IDEA 編號即可查看詳細內容",
-            )
+            reply(channel, f"抽到：{idea['idea_id']}\n輸入 IDEA 編號即可查看詳細內容")
         return "", 200
 
     # 2. 平台查詢
@@ -195,10 +195,7 @@ def slack_events():
             reply(channel, f"沒有找到與 {text} 相關的 idea")
         else:
             ids = "\n".join([i["idea_id"] for i in ideas])
-            reply(
-                channel,
-                f"{text} 相關的 idea：\n{ids}\n輸入 IDEA 編號即可查看詳細內容",
-            )
+            reply(channel, f"{text} 相關的 idea：\n{ids}\n輸入 IDEA 編號即可查看詳細內容")
         return "", 200
 
     # 3. 關鍵字查詢
@@ -208,10 +205,7 @@ def slack_events():
             reply(channel, f"沒有找到與 {text} 相關的 idea")
         else:
             ids = "\n".join([i["idea_id"] for i in ideas])
-            reply(
-                channel,
-                f"{text} 相關的 idea：\n{ids}\n輸入 IDEA 編號即可查看詳細內容",
-            )
+            reply(channel, f"{text} 相關的 idea：\n{ids}\n輸入 IDEA 編號即可查看詳細內容")
         return "", 200
 
     # 4. 查單一 IDEA
