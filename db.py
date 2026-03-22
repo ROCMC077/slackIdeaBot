@@ -60,9 +60,9 @@ def insert_idea(platforms, keywords, links, extra_info):
         RETURNING idea_id;
     """, (
         idea_id,
-        json.dumps(platforms),
-        json.dumps(keywords),
-        json.dumps(links),
+        platforms,   # ❗ 不要 dumps
+        keywords,    # ❗ 不要 dumps
+        links,       # ❗ 不要 dumps
         extra_info
     ))
 
