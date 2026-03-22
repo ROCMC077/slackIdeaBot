@@ -5,22 +5,19 @@ import psycopg2
 import psycopg2.extras
 from psycopg2.extras import RealDictCursor, Json
 
-# Railway 提供的 DATABASE_URL
 DATABASE_URL = os.environ.get("DATABASE_URL")
 
-
 # -----------------------------
-# DB 連線（含 Retry，避免 Flask 啟動卡住）
+# DB 連線（含 Retry）
 # -----------------------------
 def get_conn():
     for i in range(10):
         try:
             return psycopg2.connect(DATABASE_URL, sslmode="require")
-        except Exception as e:
+        except Exception:
             print(f"[DB] Not ready, retrying... ({i+1}/10)")
             time.sleep(1)
     raise Exception("DB connection failed after retries")
-
 
 # -----------------------------
 # 建立資料表
@@ -45,16 +42,14 @@ def init_db():
     cur.close()
     conn.close()
 
-
 # -----------------------------
-# 產生 IDEA-000001 這種編號
+# 產生 IDEA-000001
 # -----------------------------
 def generate_idea_id(cur):
     cur.execute("SELECT COUNT(*) AS count FROM ideas;")
     row = cur.fetchone()
     count = row["count"] + 1
     return f"IDEA-{count:06d}"
-
 
 # -----------------------------
 # 新增一筆 idea
@@ -71,9 +66,9 @@ def insert_idea(platforms, keywords, links, extra_info):
         RETURNING idea_id;
     """, (
         idea_id,
-        Json(platforms),   # 正確 JSONB
-        Json(keywords),    # 正確 JSONB
-        Json(links),       # 正確 JSONB
+        Json(platforms),
+        Json(keywords),
+        Json(links),
         extra_info
     ))
 
@@ -82,7 +77,6 @@ def insert_idea(platforms, keywords, links, extra_info):
     conn.close()
 
     return idea_id
-
 
 # -----------------------------
 # 隨機抽一筆
@@ -100,9 +94,7 @@ def get_random_idea():
     row = cur.fetchone()
     cur.close()
     conn.close()
-
     return row
-
 
 # -----------------------------
 # 依平台查詢
@@ -119,9 +111,7 @@ def get_ideas_by_platform(platform):
     rows = cur.fetchall()
     cur.close()
     conn.close()
-
     return rows
-
 
 # -----------------------------
 # 依關鍵字查詢
@@ -138,9 +128,7 @@ def get_ideas_by_keyword(keyword):
     rows = cur.fetchall()
     cur.close()
     conn.close()
-
     return rows
-
 
 # -----------------------------
 # 查單一 IDEA
@@ -157,5 +145,4 @@ def get_idea_by_id(idea_id):
     row = cur.fetchone()
     cur.close()
     conn.close()
-
     return row

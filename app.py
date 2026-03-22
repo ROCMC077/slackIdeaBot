@@ -1,151 +1,110 @@
 import os
-import json
-import psycopg2
-import psycopg2.extras
-from psycopg2.extras import RealDictCursor, Json
-from datetime import datetime
+from flask import Flask, request, jsonify
+from slack_sdk import WebClient
+from slack_sdk.signature import SignatureVerifier
+from db import init_db, insert_idea
 
-# Railway 提供的 DATABASE_URL
-DATABASE_URL = os.environ.get("DATABASE_URL")
+app = Flask(__name__)
 
-def get_conn():
-    return psycopg2.connect(DATABASE_URL, sslmode="require")
+SLACK_BOT_TOKEN = os.environ.get("SLACK_BOT_TOKEN")
+SLACK_SIGNING_SECRET = os.environ.get("SLACK_SIGNING_SECRET")
 
-
-# -----------------------------
-# 建立資料表
-# -----------------------------
-def init_db():
-    conn = get_conn()
-    cur = conn.cursor()
-
-    cur.execute("""
-        CREATE TABLE IF NOT EXISTS ideas (
-            id SERIAL PRIMARY KEY,
-            idea_id TEXT UNIQUE,
-            platforms JSONB,
-            keywords JSONB,
-            links JSONB,
-            extra_info TEXT,
-            created_at TIMESTAMP DEFAULT NOW()
-        );
-    """)
-
-    conn.commit()
-    cur.close()
-    conn.close()
-
+client = WebClient(token=SLACK_BOT_TOKEN)
+verifier = SignatureVerifier(SLACK_SIGNING_SECRET)
 
 # -----------------------------
-# 產生 IDEA-000001 這種編號
+# 啟動時建立資料表
 # -----------------------------
-def generate_idea_id(cur):
-    cur.execute("SELECT COUNT(*) AS count FROM ideas;")
-    row = cur.fetchone()
-    count = row["count"] + 1
-    return f"IDEA-{count:06d}"
-
+init_db()
 
 # -----------------------------
-# 新增一筆 idea
+# Slash Command: /submit-idea
 # -----------------------------
-def insert_idea(platforms, keywords, links, extra_info):
-    conn = get_conn()
-    cur = conn.cursor(cursor_factory=RealDictCursor)
+@app.route("/submit-idea", methods=["POST"])
+def submit_idea():
+    trigger_id = request.form.get("trigger_id")
 
-    idea_id = generate_idea_id(cur)
+    client.views_open(
+        trigger_id=trigger_id,
+        view={
+            "type": "modal",
+            "callback_id": "idea_modal",
+            "title": {"type": "plain_text", "text": "Submit Idea"},
+            "submit": {"type": "plain_text", "text": "Submit"},
+            "blocks": [
+                {
+                    "type": "input",
+                    "block_id": "platforms",
+                    "label": {"type": "plain_text", "text": "Platforms"},
+                    "element": {
+                        "type": "plain_text_input",
+                        "action_id": "value"
+                    }
+                },
+                {
+                    "type": "input",
+                    "block_id": "keywords",
+                    "label": {"type": "plain_text", "text": "Keywords"},
+                    "element": {
+                        "type": "plain_text_input",
+                        "action_id": "value"
+                    }
+                },
+                {
+                    "type": "input",
+                    "block_id": "links",
+                    "label": {"type": "plain_text", "text": "Links"},
+                    "element": {
+                        "type": "plain_text_input",
+                        "action_id": "value"
+                    }
+                },
+                {
+                    "type": "input",
+                    "block_id": "extra_info",
+                    "label": {"type": "plain_text", "text": "Extra Info"},
+                    "element": {
+                        "type": "plain_text_input",
+                        "action_id": "value"
+                    }
+                }
+            ]
+        }
+    )
 
-    cur.execute("""
-        INSERT INTO ideas (idea_id, platforms, keywords, links, extra_info)
-        VALUES (%s, %s, %s, %s, %s)
-        RETURNING idea_id;
-    """, (
-        idea_id,
-        Json(platforms),   # 正確：轉成 JSONB
-        Json(keywords),    # 正確：轉成 JSONB
-        Json(links),       # 正確：轉成 JSONB
-        extra_info
-    ))
-
-    conn.commit()
-    cur.close()
-    conn.close()
-
-    return idea_id
-
-
-# -----------------------------
-# 隨機抽一筆
-# -----------------------------
-def get_random_idea():
-    conn = get_conn()
-    cur = conn.cursor(cursor_factory=RealDictCursor)
-
-    cur.execute("""
-        SELECT * FROM ideas
-        ORDER BY RANDOM()
-        LIMIT 1;
-    """)
-
-    row = cur.fetchone()
-    cur.close()
-    conn.close()
-
-    return row
-
-
-# -----------------------------
-# 依平台查詢
-# -----------------------------
-def get_ideas_by_platform(platform):
-    conn = get_conn()
-    cur = conn.cursor(cursor_factory=RealDictCursor)
-
-    cur.execute("""
-        SELECT idea_id FROM ideas
-        WHERE platforms @> %s::jsonb;
-    """, (json.dumps([platform]),))
-
-    rows = cur.fetchall()
-    cur.close()
-    conn.close()
-
-    return rows
-
+    return "", 200
 
 # -----------------------------
-# 依關鍵字查詢
+# Modal Submission
 # -----------------------------
-def get_ideas_by_keyword(keyword):
-    conn = get_conn()
-    cur = conn.cursor(cursor_factory=RealDictCursor)
+@app.route("/slack/interactions", methods=["POST"])
+def interactions():
+    if not verifier.is_valid_request(request.get_data(), request.headers):
+        return "invalid signature", 403
 
-    cur.execute("""
-        SELECT idea_id FROM ideas
-        WHERE keywords @> %s::jsonb;
-    """, (json.dumps([keyword]),))
+    payload = request.form.get("payload")
+    if not payload:
+        return "", 200
 
-    rows = cur.fetchall()
-    cur.close()
-    conn.close()
+    import json
+    data = json.loads(payload)
 
-    return rows
+    if data.get("type") == "view_submission":
+        values = data["view"]["state"]["values"]
 
+        platforms = values["platforms"]["value"]["value"].split(",")
+        keywords = values["keywords"]["value"]["value"].split(",")
+        links = values["links"]["value"]["value"].split(",")
+        extra_info = values["extra_info"]["value"]["value"]
+
+        idea_id = insert_idea(platforms, keywords, links, extra_info)
+
+        return jsonify({"response_action": "clear"})
+
+    return "", 200
 
 # -----------------------------
-# 查單一 IDEA
+# Flask 啟動
 # -----------------------------
-def get_idea_by_id(idea_id):
-    conn = get_conn()
-    cur = conn.cursor(cursor_factory=RealDictCursor)
-
-    cur.execute("""
-        SELECT * FROM ideas
-        WHERE idea_id = %s;
-    """, (idea_id,))
-
-    row = cur.fetchone()
-    cur.close()
-    conn.close()
-
-    return row
+if __name__ == "__main__":
+    app.run(host="0.0.0.0", port=3000)
