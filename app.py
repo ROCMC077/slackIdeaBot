@@ -1,4 +1,5 @@
 import os
+import json
 from flask import Flask, request, jsonify
 from slack_sdk import WebClient
 from slack_sdk.signature import SignatureVerifier
@@ -36,37 +37,25 @@ def submit_idea():
                     "type": "input",
                     "block_id": "platforms",
                     "label": {"type": "plain_text", "text": "Platforms"},
-                    "element": {
-                        "type": "plain_text_input",
-                        "action_id": "value"
-                    }
+                    "element": {"type": "plain_text_input", "action_id": "value"}
                 },
                 {
                     "type": "input",
                     "block_id": "keywords",
                     "label": {"type": "plain_text", "text": "Keywords"},
-                    "element": {
-                        "type": "plain_text_input",
-                        "action_id": "value"
-                    }
+                    "element": {"type": "plain_text_input", "action_id": "value"}
                 },
                 {
                     "type": "input",
                     "block_id": "links",
                     "label": {"type": "plain_text", "text": "Links"},
-                    "element": {
-                        "type": "plain_text_input",
-                        "action_id": "value"
-                    }
+                    "element": {"type": "plain_text_input", "action_id": "value"}
                 },
                 {
                     "type": "input",
                     "block_id": "extra_info",
                     "label": {"type": "plain_text", "text": "Extra Info"},
-                    "element": {
-                        "type": "plain_text_input",
-                        "action_id": "value"
-                    }
+                    "element": {"type": "plain_text_input", "action_id": "value"}
                 }
             ]
         }
@@ -86,7 +75,6 @@ def interactions():
     if not payload:
         return "", 200
 
-    import json
     data = json.loads(payload)
 
     if data.get("type") == "view_submission":
@@ -97,14 +85,15 @@ def interactions():
         links = values["links"]["value"]["value"].split(",")
         extra_info = values["extra_info"]["value"]["value"]
 
-        idea_id = insert_idea(platforms, keywords, links, extra_info)
+        insert_idea(platforms, keywords, links, extra_info)
 
         return jsonify({"response_action": "clear"})
 
     return "", 200
 
 # -----------------------------
-# Flask 啟動
+# Flask 啟動（Railway 必須用動態 PORT）
 # -----------------------------
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=3000)
+    port = int(os.environ.get("PORT", 3000))
+    app.run(host="0.0.0.0", port=port)
