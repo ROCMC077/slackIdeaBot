@@ -1,6 +1,5 @@
 import json
 
-
 # -----------------------------
 # 投稿表單（Modal）
 # -----------------------------
@@ -97,19 +96,47 @@ def idea_form_modal():
 # Idea 詳細內容卡片（Block Kit）
 # -----------------------------
 def idea_detail_block(idea):
-    platforms = "、".join(idea["platforms"])
-    keywords = "、".join(idea["keywords"])
+    platforms = "、".join(idea.get("platforms", []))
+    keywords = "、".join(idea.get("keywords", []))
 
-    # 連結格式化
+    # -----------------------------
+    # 🔥 安全處理 links（永不 crash）
+    # -----------------------------
+    raw_links = idea.get("links")
+
+    # 1. 如果 links 是字串 → 嘗試轉成 JSON
+    if isinstance(raw_links, str):
+        try:
+            links = json.loads(raw_links)
+        except:
+            links = {}
+    else:
+        links = raw_links
+
+    # 2. 如果不是 dict → 強制變成 {}
+    if not isinstance(links, dict):
+        links = {}
+
+    # -----------------------------
+    # 🔥 格式化連結（保留你原本的呈現方式）
+    # -----------------------------
     link_lines = []
-    for category, urls in idea["links"].items():
+    for category, urls in links.items():
+
+        # urls 可能是字串 → 包成 list
+        if isinstance(urls, str):
+            urls = [urls]
+
         for url in urls:
             link_lines.append(f"- *{category}*：<{url}>")
 
     links_text = "\n".join(link_lines) if link_lines else "（無）"
 
-    extra_info = idea["extra_info"] or "（無）"
+    extra_info = idea.get("extra_info") or "（無）"
 
+    # -----------------------------
+    # 🔥 完全保留你原本的 Block Kit
+    # -----------------------------
     return [
         {
             "type": "header",
