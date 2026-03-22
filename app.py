@@ -83,60 +83,65 @@ def open_idea_form():
 def slack_interactions():
     raw = request.form.get("payload") or request.get_data(as_text=True)
     payload = json.loads(raw)
-    print("\n===== Slack Payload =====")
-    print(json.dumps(payload, indent=2, ensure_ascii=False))
-    print("===== END =====\n")
+
+    # Slack view_submission
     if payload.get("type") == "view_submission":
-        state = payload["view"]["state"]["values"]
+        values = payload["view"]["state"]["values"]
 
-        platforms = [
-            opt["value"]
-            for opt in state["platform"]["platform_select"].get("selected_options", [])
-        ]
+        # 平台
+        platform_block = values.get("platform", {})
+        platform_input = platform_block.get("platform_select", {})
+        platforms = [opt["value"] for opt in platform_input.get("selected_options", [])]
 
-        keywords = [
-            opt["value"]
-            for opt in state["keywords"]["keyword_select"].get("selected_options", [])
-        ]
+        # 關鍵字
+        keyword_block = values.get("keywords", {})
+        keyword_input = keyword_block.get("keyword_select", {})
+        keywords = [opt["value"] for opt in keyword_input.get("selected_options", [])]
 
-        other_keyword = (
-            state["keyword_other"]["keyword_other_input"].get("value") or ""
-        )
+        # 其它關鍵字
+        other_block = values.get("keyword_other", {})
+        other_input = other_block.get("keyword_other_input", {})
+        other_keyword = other_input.get("value") or ""
         if other_keyword:
             keywords.append(other_keyword)
 
-        raw_links = state["links"]["links_input"].get("value") or ""
+        # 🔥 連結（這裡是你之前抓不到的地方）
+        links_block = values.get("links", {})
+        links_input = links_block.get("links_input", {})
+        raw_links = links_input.get("value") or ""
+
+        # 解析多行連結
         links = {}
         for line in raw_links.split("\n"):
             if "：" in line:
                 k, v = line.split("：", 1)
                 links.setdefault(k.strip(), []).append(v.strip())
 
-        extra_info = (
-            state["extra_info"]["extra_info_input"].get("value") or ""
-        )
+        # 補充資訊
+        extra_block = values.get("extra_info", {})
+        extra_input = extra_block.get("extra_info_input", {})
+        extra_info = extra_input.get("value") or ""
 
+        # 寫入資料庫
         idea_id = insert_idea(platforms, keywords, links, extra_info)
 
-        return jsonify(
-            {
-                "response_action": "update",
-                "view": {
-                    "type": "modal",
-                    "title": {"type": "plain_text", "text": "投稿成功"},
-                    "close": {"type": "plain_text", "text": "關閉"},
-                    "blocks": [
-                        {
-                            "type": "section",
-                            "text": {
-                                "type": "mrkdwn",
-                                "text": f"你的 Idea 已成功投稿！\n編號：*{idea_id}*",
-                            },
+        return jsonify({
+            "response_action": "update",
+            "view": {
+                "type": "modal",
+                "title": {"type": "plain_text", "text": "投稿成功"},
+                "close": {"type": "plain_text", "text": "關閉"},
+                "blocks": [
+                    {
+                        "type": "section",
+                        "text": {
+                            "type": "mrkdwn",
+                            "text": f"你的 Idea 已成功投稿！\n編號：*{idea_id}*"
                         }
-                    ],
-                },
+                    }
+                ]
             }
-        )
+        })
 
     return "", 200
 
