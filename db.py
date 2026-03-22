@@ -1,14 +1,25 @@
 import os
 import json
+import time
 import psycopg2
 import psycopg2.extras
-from datetime import datetime
+from psycopg2.extras import RealDictCursor, Json
 
 # Railway 提供的 DATABASE_URL
 DATABASE_URL = os.environ.get("DATABASE_URL")
 
+
+# -----------------------------
+# DB 連線（含 Retry，避免 Flask 啟動卡住）
+# -----------------------------
 def get_conn():
-    return psycopg2.connect(DATABASE_URL, sslmode="require")
+    for i in range(10):
+        try:
+            return psycopg2.connect(DATABASE_URL, sslmode="require")
+        except Exception as e:
+            print(f"[DB] Not ready, retrying... ({i+1}/10)")
+            time.sleep(1)
+    raise Exception("DB connection failed after retries")
 
 
 # -----------------------------
@@ -50,7 +61,7 @@ def generate_idea_id(cur):
 # -----------------------------
 def insert_idea(platforms, keywords, links, extra_info):
     conn = get_conn()
-    cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+    cur = conn.cursor(cursor_factory=RealDictCursor)
 
     idea_id = generate_idea_id(cur)
 
@@ -60,9 +71,9 @@ def insert_idea(platforms, keywords, links, extra_info):
         RETURNING idea_id;
     """, (
         idea_id,
-        platforms,   # ❗ 不要 dumps
-        keywords,    # ❗ 不要 dumps
-        links,       # ❗ 不要 dumps
+        Json(platforms),   # 正確 JSONB
+        Json(keywords),    # 正確 JSONB
+        Json(links),       # 正確 JSONB
         extra_info
     ))
 
@@ -78,7 +89,7 @@ def insert_idea(platforms, keywords, links, extra_info):
 # -----------------------------
 def get_random_idea():
     conn = get_conn()
-    cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+    cur = conn.cursor(cursor_factory=RealDictCursor)
 
     cur.execute("""
         SELECT * FROM ideas
@@ -98,7 +109,7 @@ def get_random_idea():
 # -----------------------------
 def get_ideas_by_platform(platform):
     conn = get_conn()
-    cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+    cur = conn.cursor(cursor_factory=RealDictCursor)
 
     cur.execute("""
         SELECT idea_id FROM ideas
@@ -117,7 +128,7 @@ def get_ideas_by_platform(platform):
 # -----------------------------
 def get_ideas_by_keyword(keyword):
     conn = get_conn()
-    cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+    cur = conn.cursor(cursor_factory=RealDictCursor)
 
     cur.execute("""
         SELECT idea_id FROM ideas
@@ -136,7 +147,7 @@ def get_ideas_by_keyword(keyword):
 # -----------------------------
 def get_idea_by_id(idea_id):
     conn = get_conn()
-    cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+    cur = conn.cursor(cursor_factory=RealDictCursor)
 
     cur.execute("""
         SELECT * FROM ideas
