@@ -32,7 +32,7 @@ def home():
 
 
 # -----------------------------
-# 共用查詢邏輯（DM + @bot 都會用）
+# 共用查詢邏輯（DM + @bot）
 # -----------------------------
 def handle_query(text, channel):
 
@@ -103,12 +103,24 @@ def slack_events():
     channel_type = event.get("channel_type")
     text = event.get("text", "") or ""
     channel = event.get("channel")
+    user = event.get("user")
+
+    # -----------------------------
+    # 避免 bot 自己觸發自己（防無限循環）
+    # -----------------------------
+    if user == BOT_USER_ID:
+        return "", 200
 
     # -----------------------------
     # 1. DM 模式（message.im）
     # -----------------------------
     if event_type == "message" and channel_type == "im":
         text = text.strip()
+
+        # 避免 hi / hello 造成亂觸發
+        if text.lower() in ["hi", "hello", "嗨", "哈囉"]:
+            return "", 200
+
         return handle_query(text, channel)
 
     # -----------------------------
