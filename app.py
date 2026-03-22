@@ -105,17 +105,25 @@ def slack_interactions():
         if other_keyword:
             keywords.append(other_keyword)
 
-        # 🔥 連結（這裡是你之前抓不到的地方）
+        # 🔥 連結（支援半形 ":" 與全形 "："）
         links_block = values.get("links", {})
         links_input = links_block.get("links_input", {})
         raw_links = links_input.get("value") or ""
 
-        # 解析多行連結
         links = {}
         for line in raw_links.split("\n"):
-            if "：" in line:
+            line = line.strip()
+            if not line:
+                continue
+
+            if ":" in line:
+                k, v = line.split(":", 1)
+            elif "：" in line:
                 k, v = line.split("：", 1)
-                links.setdefault(k.strip(), []).append(v.strip())
+            else:
+                continue
+
+            links.setdefault(k.strip(), []).append(v.strip())
 
         # 補充資訊
         extra_block = values.get("extra_info", {})
