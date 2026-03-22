@@ -83,7 +83,9 @@ def open_idea_form():
 def slack_interactions():
     raw = request.form.get("payload") or request.get_data(as_text=True)
     payload = json.loads(raw)
-
+    print("\n===== Slack Payload =====")
+    print(json.dumps(payload, indent=2, ensure_ascii=False))
+    print("===== END =====\n")
     if payload.get("type") == "view_submission":
         state = payload["view"]["state"]["values"]
 
